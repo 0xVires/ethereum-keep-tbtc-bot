@@ -1,6 +1,10 @@
 # ethereum-keep-tbtc-bot
 Sends telegram notifications about activities of the Keep/tBTC contracts on the Ethereum blockchain.
 
+## libraries
+
+Apart from the standard python libraries, the bot uses Web3.py (https://web3py.readthedocs.io/) and python-telegram-bot (https://github.com/python-telegram-bot/python-telegram-bot). 
+
 ## telegram-bot.py
 Takes care of subscriptions to operator addresses. 
 Stores those addresses with the chat_ids in operator_subscriptions.json
