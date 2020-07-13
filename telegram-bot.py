@@ -2,7 +2,7 @@ import logging
 import json
 from telegram import ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, ConversationHandler
-from config import WS_LOCAL, TEL_TOKEN
+from config_mainnet_private import WS_LOCAL, TEL_TOKEN
 from web3 import Web3
 
 w3 = Web3(Web3.WebsocketProvider(WS_LOCAL))
@@ -19,7 +19,8 @@ SUBSCRIBE, REMOVE, AVAILABLE_COMMANDS = range(3)
 def start(update, context):
     """Send a message when typing anything other than the available commands."""
     reply_keyboard = [['Subscribe', 'Remove'], 
-                      ['My subscriptions', 'Quit']]
+                      ['My subscriptions', 'Available TDTs'],
+                      ['Quit']]
 
     update.message.reply_text(
         "Welcome to the tBTC-Watcher bot! \n\n"
@@ -48,7 +49,8 @@ def subscribe(update, context):
     3) o is not in subscriptions: add c & o
     """
     reply_keyboard = [['Subscribe', 'Remove'], 
-                      ['My subscriptions', 'Quit']]
+                      ['My subscriptions', 'Available TDTs'],
+                      ['Quit']]
     
     user = update.message.from_user
     chat_id = update.message.chat.id
@@ -85,7 +87,8 @@ def remove(update, context):
     If the operator has no subscribers, remove the operator.
     """
     reply_keyboard = [['Subscribe', 'Remove'], 
-                      ['My subscriptions', 'Quit']]
+                      ['My subscriptions', 'Available TDTs'],
+                      ['Quit']]
     
     user = update.message.from_user
     chat_id = update.message.chat.id
@@ -118,9 +121,32 @@ def remove(update, context):
         update.message.reply_text("This is not a valid address, please try again...")
         return REMOVE
 
+def available_tdts(update, context):
+    reply_keyboard = [['Subscribe', 'Remove'], 
+                      ['My subscriptions', 'Available TDTs'],
+                      ['Quit']]
+    chat_id = update.message.chat.id
+    with open("operator_tdts.json", "r") as fh:
+        otdts = json.load(fh)
+    with open("operator_subscriptions.json", "r") as f:
+        subscriptions = json.load(f)
+    for o in subscriptions:
+        if otdts.get(o):
+            message = f"TDTs in vending machine for operator {o[:7]}:\n\n"       
+            for tdt, eth in sorted(otdts[o].items(), key=lambda x: x[1], reverse=True):
+                if tdt != "sumETH":
+                    message += f"{tdt} : {eth} ETH\n"
+            message += f"\nTotal ETH available to free up: {otdts[o]['sumETH']}"
+            update.message.reply_text(message)
+        else:
+            update.message.reply_text("Since you subscribed, no ETH is available to free up.")
+    update.message.reply_text("Anything else?", reply_markup=ReplyKeyboardMarkup(reply_keyboard))
+    return AVAILABLE_COMMANDS
+
 def subscriptions(update, context):
     reply_keyboard = [['Subscribe', 'Remove'], 
-                      ['My subscriptions', 'Quit']]
+                      ['My subscriptions', 'Available TDTs'],
+                      ['Quit']]
     chat_id = update.message.chat.id
     with open("operator_subscriptions.json", "r") as f:
         subscriptions = json.load(f)
@@ -132,13 +158,15 @@ def subscriptions(update, context):
 def available_commands(update, context):
     """Send a message when typing anything other than the available commands."""
     reply_keyboard = [['Subscribe', 'Remove'], 
-                      ['My subscriptions', 'Quit']]
+                      ['My subscriptions', 'Available TDTs'],
+                      ['Quit']]
 
     update.message.reply_text(
         "The following options are available: \n"
-        "My subscriptions: Lists the addresses to which you are subscribed. \n"
         "Subscribe: Add a new subscription \n"
         "Remove: Unsubscribe from an address \n"
+        "My subscriptions: Lists the addresses to which you are subscribed. \n"
+        "Available TDTs: Lists the operator's TDTs that are currently in the vending machine and available to buy. \n"
         "Quit",
         reply_markup=ReplyKeyboardMarkup(reply_keyboard))
     return AVAILABLE_COMMANDS
@@ -169,6 +197,7 @@ def main():
             AVAILABLE_COMMANDS: [MessageHandler(Filters.regex(r'Subscribe'), enter_address_subscribe),
                                  MessageHandler(Filters.regex(r'Remove'), enter_address_remove),
                                  MessageHandler(Filters.regex(r'My subscriptions'), subscriptions),
+                                 MessageHandler(Filters.regex(r'Available TDTs'), available_tdts),
                                  MessageHandler(Filters.regex(r'Quit'), quit)],
 
             SUBSCRIBE: [MessageHandler(Filters.regex(r'0x'), subscribe)],

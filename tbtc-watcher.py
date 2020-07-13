@@ -1,15 +1,16 @@
 import requests
 import json
+import time
 from web3 import Web3
-from config import (ETH_NOTIFICATION_LIMIT, WS_LOCAL, KeepBonding, TBTCDepositToken, Hex_VendingMachine, TBTCSystem, 
+from config_mainnet_private import WS_LOCAL, MY_TELEGRAM_ID, TEL_TOKEN, TEL_URL
+from config_mainnet_public import (ETH_NOTIFICATION_LIMIT, KeepBonding, TBTCDepositToken, Hex_VendingMachine, TBTCSystem, 
                     Topic0_KeepBonding_BondCreated, Topic0_TBTCDepositToken_Transfer, Topic0_TBTCSystem_RedemptionRequested,
                     Topic0_KeepBonding_BondReleased, BondedECDSAKeep_ABI)
 
 w3 = Web3(Web3.WebsocketProvider(WS_LOCAL))
 
 # 1) Deposit requested and created, ETH from Operators locked
-
-def deposit_created(fromBlock, toBlock, ETH_NOTIFICATION_LIMIT):
+def deposit_created(fromBlock, toBlock, subscriptions, ETH_NOTIFICATION_LIMIT):
     """Checks for created deposits between fromBlock and toBlock with a min amount of locked ETH.
     
     If an event exists, get the operator address and check if it is in the subscription list.
@@ -33,6 +34,7 @@ def deposit_created(fromBlock, toBlock, ETH_NOTIFICATION_LIMIT):
                 tdtID = str(w3.toInt(hexstr=ECDSA.functions.getOwner().call()))
                 referenceID = w3.toInt(hexstr=event["data"][2:][:64])
                 tx = event["transactionHash"].hex()
+                # Create tdts json
                 with open("tdts.json", "r") as f:
                     tdts = json.load(f)
                 if tdts.get(tdtID):
@@ -46,15 +48,14 @@ def deposit_created(fromBlock, toBlock, ETH_NOTIFICATION_LIMIT):
                     tdts[tdtID]["referenceID"] = referenceID
                 with open("tdts.json", "w") as f:
                     json.dump(tdts, f, indent=1)
-
-                message = f"{bondedETH} ETH was just bonded for the following TDT-ID: \n{tdtID} \n\n[Transaction link](https://etherscan.io/tx/{tx})"
+                # Send notification
+                message = f"Operator {operator[:7]}:\n{bondedETH} ETH was just bonded for the following TDT-ID: \n{tdtID} \n[Transaction link](https://etherscan.io/tx/{tx})"
                 for chat_id in subscriptions[operator]:
                     send_message(message, chat_id)
                     time.sleep(1)
 
-# 3) TDT to tBTC (sends TDT to vending machine)
-
-def tdt_to_vendingMachine(fromBlock, toBlock):
+# 2) TDT to tBTC (sends TDT to vending machine)
+def tdt_to_vendingMachine(fromBlock, toBlock, subscriptions):
     """Checks for TDTs sent to the vending machine between fromBlock and toBlock.
     
     If an event exists, get the TDT-ID and notify all subscribed operators backing that TDT.
@@ -75,15 +76,19 @@ def tdt_to_vendingMachine(fromBlock, toBlock):
         if tdtID in tdts:
             bondedETH = tdts[tdtID]["bondedETH"]
             tx = event["transactionHash"].hex()
-            message = f"TDT-ID \n{tdtID} \nis available to buy. You could release {bondedETH} ETH by buying it. \n\n[Transaction link](https://etherscan.io/tx/{tx})"
+            with open("tdts.json", "w") as f:
+                json.dump(tdts, f, indent=1)
             for operator in tdts[tdtID]["operators"]:
+                # Create operator-tdts json to display tdts available to buy
+                write_operator_tdts(operator, tdtID, bondedETH)
+                # Send notification
+                message = f"Operator {operator[:7]}:\nTDT-ID \n{tdtID} \nis available to buy. You could release {bondedETH} ETH by buying it. \n[Transaction link](https://etherscan.io/tx/{tx})"
                 for chat_id in subscriptions[operator]:
                     send_message(message, chat_id)
                     time.sleep(1)
 
-# 4) tBTC to BTC Part 1: Redemption Requested (ETH still locked, but TDT transferred to requester -> notify that TDT can no longer be bought)
-
-def redemption_requested(fromBlock, toBlock):
+# 3) tBTC to BTC Part 1: Redemption Requested (ETH still locked, but TDT transferred to requester -> notify that TDT can no longer be bought)
+def redemption_requested(fromBlock, toBlock, subscriptions):
     """Checks for TDTs sent to the vending machine between fromBlock and toBlock.
     
     If an event exists, get the TDT-ID and notify all subscribed operators backing that TDT.
@@ -103,16 +108,24 @@ def redemption_requested(fromBlock, toBlock):
         if tdtID in tdts:
             bondedETH = tdts[tdtID]["bondedETH"]
             tx = event["transactionHash"].hex()
-            message = f"Redemption requested for TDT-ID {tdtID} \nYour bonded ETH ({bondedETH}) will be released soon! \n\n[Transaction link](https://etherscan.io/tx/{tx})"
-            for operator in tdts[tdtID]["operators"]:
+            with open("tdts.json", "w") as f:
+                json.dump(tdts, f, indent=1)
+            for operator in tdts[tdtID]["operators"]:              
+                # Remove TDT from "available to buy" status
+                with open("operator_tdts.json", "r") as f:
+                    otdts = json.load(f)
+                otdts[operator]["sumETH"] -= otdts[operator][tdtID]
+                del otdts[operator][tdtID]
+                with open("operator_tdts.json", "w") as f:
+                    json.dump(otdts, f, indent=1)  
+                # Send notification  
+                message = f"Operator {operator[:7]}:\nRedemption requested for TDT-ID {tdtID} \nYour bonded ETH ({bondedETH}) will be released soon! \n[Transaction link](https://etherscan.io/tx/{tx})"
                 for chat_id in subscriptions[operator]:
                     send_message(message, chat_id)
                     time.sleep(1)
 
-
-# 5) tBTC to BTC Part 2: Bond released & redeemed OR BTC Deposit/Setup failed and bond released...
-
-def bond_released(fromBlock, toBlock):
+# 4) tBTC to BTC Part 2: Bond released & redeemed OR BTC Deposit/Setup failed and bond released...
+def bond_released(fromBlock, toBlock, subscriptions):
     """Checks for released bonds between fromBlock and toBlock.
     
     If an event exists, get the reference-ID, match it with the TDT-ID and notify all subscribed operators backing that TDT.
@@ -139,14 +152,27 @@ def bond_released(fromBlock, toBlock):
                 if tdts[tdtID]["referenceID"] == referenceID:         
                     bondedETH = tdts[tdtID]["bondedETH"]
                     tx = event["transactionHash"].hex()
-                    message = f"{bondedETH} ETH bonded to TDT-ID {tdtID} was just released! \n\n[Transaction link](https://etherscan.io/tx/{tx})"
-                    for operator in tdts[tdtID]["operators"]:
-                        for chat_id in subscriptions[operator]:
-                            send_message(message, chat_id)
-                            time.sleep(1)
+                    message = f"Operator {operator[:7]}:\n{bondedETH} ETH bonded to TDT-ID {tdtID} was just released! \n[Transaction link](https://etherscan.io/tx/{tx})"
+                    for chat_id in subscriptions[operator]:
+                        send_message(message, chat_id)
+                        time.sleep(1)
                     del tdts[tdtID]
                     with open("tdts.json", "w") as f:
                         json.dump(tdts, f, indent=1)
+
+# Write operator-tdts json to list all the TDTs available to buy from an operator
+def write_operator_tdts(operator, tdtID, bondedETH):
+    with open("operator_tdts.json", "r") as f:
+        otdts = json.load(f)                
+    if not otdts.get(operator):
+        otdts[operator] = {}
+        otdts[operator]["sumETH"] = bondedETH
+        otdts[operator][tdtID] = bondedETH
+    else:   
+        otdts[operator]["sumETH"] += bondedETH
+        otdts[operator][tdtID] = bondedETH
+    with open("operator_tdts.json", "w") as f:
+        json.dump(otdts, f, indent=1)  
 
 # Telegram - send message
 def send_message(text, chat_id):
@@ -155,7 +181,6 @@ def send_message(text, chat_id):
         requests.get(sendURL)
     except Exception as ex:
         print(ex)
-
 
 def main():
     # Read previous blocknumber and get new blocknumber (-5)
@@ -172,16 +197,16 @@ def main():
         subscriptions = json.load(f)
     # Check for events
     try:
-        deposit_created(blockOld, block, ETH_NOTIFICATION_LIMIT)
-        tdt_to_vendingMachine(blockOld, block)
-        redemption_requested(blockOld, block)
-        bond_released(blockOld, block)
+        deposit_created(blockOld, block, subscriptions, ETH_NOTIFICATION_LIMIT)
+        tdt_to_vendingMachine(blockOld, block, subscriptions)
+        redemption_requested(blockOld, block, subscriptions)
+        bond_released(blockOld, block, subscriptions)
+        # Write new processed blocknumber to file
+        with open('block_record.txt', 'w') as fh:
+            fh.write(str(block))
     except Exception as ex:
         print(ex)
         send_message(ex, MY_TELEGRAM_ID)
-    # Write new processed blocknumber to file
-    with open('block_record.txt', 'w') as fh:
-        fh.write(str(block))
 
 if __name__ == '__main__':
     main()

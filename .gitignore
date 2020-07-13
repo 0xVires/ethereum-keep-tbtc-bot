@@ -2,3 +2,6 @@ config.py
 block_record.txt
 operator_subscriptions.json
 tdts.json
+operator_tdts.json
+config_testnet_private.py
+config_mainnet_private.py
