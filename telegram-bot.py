@@ -1,8 +1,9 @@
 import logging
 import json
-from telegram import ReplyKeyboardMarkup, ReplyKeyboardRemove
+from telegram import ReplyKeyboardMarkup, ReplyKeyboardRemove, ParseMode
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, ConversationHandler
 from config_mainnet_private import WS_LOCAL, TEL_TOKEN
+from config_mainnet_public import ETH_NOTIFICATION_LIMIT
 from web3 import Web3
 
 w3 = Web3(Web3.WebsocketProvider(WS_LOCAL))
@@ -72,8 +73,9 @@ def subscribe(update, context):
             subscriptions[operatorChecksum] = [chat_id]
         with open("operator_subscriptions.json", "w") as f:
             json.dump(subscriptions, f, indent=1)
-        update.message.reply_text("Subscription added, you will now get notified about events of {} \n\n"
-                                  "Anything else?".format(operatorChecksum), reply_markup=ReplyKeyboardMarkup(reply_keyboard))
+        update.message.reply_text("Subscription added, you will now get notified about events of {} \n"
+                                  "The notification limit is currently set to bonds > {} ETH \n\n"
+                                  "Anything else?".format(operatorChecksum, ETH_NOTIFICATION_LIMIT), reply_markup=ReplyKeyboardMarkup(reply_keyboard))
         return AVAILABLE_COMMANDS
     else:
         update.message.reply_text("This is not a valid address, please try again...")
@@ -139,7 +141,7 @@ def available_tdts(update, context):
             message += f"\nTotal ETH available to free up: {otdts[o]['sumETH']}"
             update.message.reply_text(message)
         else:
-            update.message.reply_text("Since you subscribed, no ETH is available to free up.")
+            update.message.reply_text(f"For operator {o[:7]}, no ETH is available to free up (since your subscription).")
     update.message.reply_text("Anything else?", reply_markup=ReplyKeyboardMarkup(reply_keyboard))
     return AVAILABLE_COMMANDS
 
@@ -162,13 +164,13 @@ def available_commands(update, context):
                       ['Quit']]
 
     update.message.reply_text(
-        "The following options are available: \n"
-        "Subscribe: Add a new subscription \n"
-        "Remove: Unsubscribe from an address \n"
-        "My subscriptions: Lists the addresses to which you are subscribed. \n"
-        "Available TDTs: Lists the operator's TDTs that are currently in the vending machine and available to buy. \n"
-        "Quit",
-        reply_markup=ReplyKeyboardMarkup(reply_keyboard))
+        "The following options are available: \n\n"
+        "\- *Subscribe*: Add a new subscription \n"
+        "\- *Remove*: Unsubscribe from an address \n"
+        "\- *My subscriptions*: Lists the addresses to which you are subscribed \n"
+        "\- *Available TDTs*: Lists the operator's TDTs that are currently in the vending machine and available to buy \n"
+        "\- *Quit*",
+        reply_markup=ReplyKeyboardMarkup(reply_keyboard), parse_mode=ParseMode.MARKDOWN_V2)
     return AVAILABLE_COMMANDS
 
 
